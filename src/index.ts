@@ -14,8 +14,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { initConfig } from './config.js';
-import { logger } from './logger.js';
-import { initMcpLogger } from './mcpLogger.js';
+import { initMcpLogger, sendMcpLog } from './mcpLogger.js';
 import { SEARCH_CONTEXT_TOOL } from './prompts/searchContext.js';
 import { searchContextTool } from './tools/searchContext.js';
 
@@ -59,12 +58,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  logger.info(`Tool called: ${name}, args: ${JSON.stringify(args)}`);
-
   try {
     if (name === 'search_context') {
       const result = await searchContextTool(args as { project_root_path?: string; query?: string });
-      logger.info(`Tool result: ${result?.text?.substring(0, 100)}...`);
       return {
         content: [
           {
@@ -85,7 +81,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error(`Tool execution error: ${errorMessage}`);
+    sendMcpLog('error', `❌ 工具执行错误: ${errorMessage}`);
     return {
       content: [
         {
@@ -103,18 +99,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main(): Promise<void> {
   try {
     // 初始化配置
-    const config = initConfig();
-
-    logger.info('Starting ace-tool MCP server...');
-    logger.info(`API: ${config.baseUrl}`);
+    initConfig();
 
     // 启动 MCP 服务器
     const transport = new StdioServerTransport();
     await server.connect(transport);
-
-    logger.info('MCP server connected via stdio');
   } catch (error: unknown) {
-    logger.exception('Server error', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    sendMcpLog('error', `❌ 服务器错误: ${errorMessage}`);
     process.exit(1);
   }
 }

@@ -5,7 +5,6 @@
 
 import fs from 'fs';
 import path from 'path';
-import { logger } from '../logger.js';
 
 /**
  * 检测项目根目录
@@ -16,7 +15,6 @@ import { logger } from '../logger.js';
  */
 export function detectProjectRoot(): string {
   const cwd = process.cwd();
-  logger.debug(`Detecting project root from: ${cwd}`);
 
   let currentDir = cwd;
 
@@ -24,14 +22,12 @@ export function detectProjectRoot(): string {
     // 优先检查 .ace-tool 目录
     const acePath = path.join(currentDir, '.ace-tool');
     if (fs.existsSync(acePath) && fs.statSync(acePath).isDirectory()) {
-      logger.info(`Found project root (via .ace-tool): ${currentDir}`);
       return currentDir;
     }
 
     // 其次检查 .git 目录
     const gitPath = path.join(currentDir, '.git');
     if (fs.existsSync(gitPath)) {
-      logger.info(`Found project root (via .git): ${currentDir}`);
       return currentDir;
     }
 
@@ -47,7 +43,6 @@ export function detectProjectRoot(): string {
   }
 
   // 如果找不到 .ace-tool 或 .git，使用当前工作目录
-  logger.warning(`No .ace-tool or .git found, using current directory: ${cwd}`);
   return cwd;
 }
 
@@ -63,7 +58,6 @@ export function getAceDir(projectRoot: string): string {
 
   if (!fs.existsSync(aceDir)) {
     fs.mkdirSync(aceDir, { recursive: true });
-    logger.info(`Created .ace-tool directory: ${aceDir}`);
 
     // 尝试将 .ace-tool 添加到 .gitignore
     addToGitignore(projectRoot);
@@ -95,9 +89,8 @@ function addToGitignore(projectRoot: string): void {
       : `${content}\n.ace-tool/\n`;
 
     fs.writeFileSync(gitignorePath, newContent, 'utf-8');
-    logger.info('Added .ace-tool/ to .gitignore');
   } catch (error) {
-    logger.warning(`Failed to update .gitignore: ${error}`);
+    // 静默处理错误
   }
 }
 

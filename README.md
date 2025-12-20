@@ -88,6 +88,26 @@ The `.ace-tool` directory is automatically added to `.gitignore`.
 - **Web**: `.html`, `.css`, `.scss`, `.sass`, `.less`, `.vue`, `.svelte`
 - **Scripts**: `.sql`, `.sh`, `.bash`, `.ps1`, `.bat`
 
+### Error Handling
+
+ace-tool provides friendly error messages for common issues:
+
+| Error Type | Description |
+|------------|-------------|
+| Token Invalid (401) | Token has expired or is invalid. Update `ACE_TOKEN`. |
+| Access Denied (403) | Token may have been disabled. Contact service provider. |
+| Connection Refused | Cannot connect to server. Check network or service URL. |
+| Connection Timeout | Request timed out. Check network status. |
+| DNS Resolution Failed | Cannot resolve server address. Check `ACE_BASE_URL`. |
+
+### MCP Logging
+
+ace-tool supports real-time logging via MCP protocol. Logs are automatically pushed to MCP clients that support the logging capability.
+
+Log levels: `debug`, `info`, `warning`, `error`
+
+To also save logs to a local file, use the `--enable-log` argument.
+
 ### License
 
 MIT
@@ -177,6 +197,26 @@ your-project/
 - **配置/数据**：`.md`, `.txt`, `.json`, `.yaml`, `.yml`, `.toml`, `.xml`, `.ini`, `.conf`
 - **Web**：`.html`, `.css`, `.scss`, `.sass`, `.less`, `.vue`, `.svelte`
 - **脚本**：`.sql`, `.sh`, `.bash`, `.ps1`, `.bat`
+
+### 错误处理
+
+ace-tool 为常见问题提供友好的错误提示：
+
+| 错误类型 | 描述 |
+| -------- | ---- |
+| Token 无效 (401) | Token 已过期或无效，请更新 `ACE_TOKEN` |
+| 访问被拒绝 (403) | Token 可能已被禁用，请联系服务提供商 |
+| 连接被拒绝 | 无法连接到服务器，请检查网络或服务地址 |
+| 连接超时 | 请求超时，请检查网络状况 |
+| DNS 解析失败 | 无法解析服务器地址，请检查 `ACE_BASE_URL` |
+
+### MCP 日志
+
+ace-tool 支持通过 MCP 协议实时推送日志。日志会自动推送到支持日志功能的 MCP 客户端。
+
+日志级别：`debug`, `info`, `warning`, `error`
+
+如需同时保存日志到本地文件，请使用 `--enable-log` 参数。
 
 ### 许可证
 

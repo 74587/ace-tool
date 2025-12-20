@@ -5,7 +5,7 @@
 import fs from 'fs';
 import { getConfig } from '../config.js';
 import { IndexManager } from '../index/manager.js';
-import { logger } from '../logger.js';
+import { enableFileLog, setLogProjectPath, sendMcpLog } from '../mcpLogger.js';
 
 /**
  * 工具参数接口
@@ -55,12 +55,12 @@ export async function searchContextTool(args: SearchContextArgs): Promise<ToolRe
 
     const config = getConfig();
 
-    // 根据配置启用日志
+    // 根据配置启用文件日志
     if (config.enableLog) {
-      logger.enable();
-      logger.setProjectPath(projectRoot);
+      enableFileLog();
+      setLogProjectPath(projectRoot);
     }
-    logger.info(`Tool invoked: search_context for project ${projectRoot}`);
+
     const indexManager = new IndexManager(
       projectRoot,
       config.baseUrl,
@@ -76,7 +76,7 @@ export async function searchContextTool(args: SearchContextArgs): Promise<ToolRe
     return { type: 'text', text: result };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.exception('Error in search_context_tool', error);
+    sendMcpLog('error', `❌ 工具执行错误: ${errorMessage}`);
     return { type: 'text', text: `Error: ${errorMessage}` };
   }
 }
