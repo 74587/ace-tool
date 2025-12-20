@@ -9,6 +9,7 @@ import axios, { AxiosInstance } from 'axios';
 import iconv from 'iconv-lite';
 import ignore from 'ignore';
 import { logger } from '../logger.js';
+import { sendMcpLog } from '../mcpLogger.js';
 import { getIndexFilePath } from '../utils/projectDetector.js';
 
 type IgnoreInstance = ReturnType<typeof ignore>;
@@ -365,13 +366,18 @@ export class IndexManager {
    */
   async indexProject(): Promise<IndexResult> {
     logger.info(`Indexing project: ${this.projectRoot}`);
+    sendMcpLog('info', `📂 开始索引项目: ${this.projectRoot}`);
 
     try {
+      sendMcpLog('info', '🔍 正在扫描文件...');
       const blobs = await this.collectFiles();
 
       if (blobs.length === 0) {
+        sendMcpLog('warning', '⚠️ 未找到可索引的文本文件');
         return { status: 'error', message: 'No text files found in project' };
       }
+
+      sendMcpLog('info', `📄 扫描完成，共发现 ${blobs.length} 个文件块`);
 
       // 加载已存在的索引数据
       const existingBlobNames = new Set(this.loadIndex());
@@ -394,6 +400,7 @@ export class IndexManager {
       logger.info(
         `Incremental indexing: total=${blobs.length}, existing=${existingHashes.size}, new=${newHashes.length}`
       );
+      sendMcpLog('info', `📊 增量索引: 已有 ${existingHashes.size} 个, 新增 ${newHashes.length} 个`);
 
       // 只上传新的 blob
       const uploadedBlobNames: string[] = [];
@@ -402,6 +409,7 @@ export class IndexManager {
       if (blobsToUpload.length > 0) {
         const totalBatches = Math.ceil(blobsToUpload.length / this.batchSize);
         logger.info(`Uploading ${blobsToUpload.length} new blobs in ${totalBatches} batches`);
+        sendMcpLog('info', `⬆️ 开始上传 ${blobsToUpload.length} 个新文件块，共 ${totalBatches} 批`);
 
         for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
           const startIdx = batchIdx * this.batchSize;
@@ -409,6 +417,7 @@ export class IndexManager {
           const batchBlobs = blobsToUpload.slice(startIdx, endIdx);
 
           logger.info(`Uploading batch ${batchIdx + 1}/${totalBatches} (${batchBlobs.length} blobs)`);
+          sendMcpLog('info', `📤 上传批次 ${batchIdx + 1}/${totalBatches}...`);
 
           try {
             const result = await this.retryRequest(async () => {
@@ -421,6 +430,7 @@ export class IndexManager {
             const batchBlobNames = result.blob_names || [];
             if (batchBlobNames.length === 0) {
               logger.warning(`Batch ${batchIdx + 1} returned no blob names`);
+              sendMcpLog('warning', `⚠️ 批次 ${batchIdx + 1} 返回空结果`);
               failedBatches.push(batchIdx + 1);
               continue;
             }
@@ -430,15 +440,18 @@ export class IndexManager {
           } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             logger.error(`Batch ${batchIdx + 1} failed: ${errorMessage}`);
+            sendMcpLog('error', `❌ 批次 ${batchIdx + 1} 上传失败: ${errorMessage}`);
             failedBatches.push(batchIdx + 1);
           }
         }
 
         if (uploadedBlobNames.length === 0 && blobsToUpload.length > 0 && existingHashes.size === 0) {
+          sendMcpLog('error', '❌ 所有批次上传失败');
           return { status: 'error', message: 'All batches failed on first indexing' };
         }
       } else {
         logger.info('No new blobs to upload');
+        sendMcpLog('info', '✅ 无需上传新文件，使用缓存索引');
       }
 
       // 合并已存在和新上传的 blob 名称
@@ -447,6 +460,7 @@ export class IndexManager {
 
       const message = `Indexed ${allBlobNames.length} blobs (existing: ${existingHashes.size}, new: ${uploadedBlobNames.length})`;
       logger.info(message);
+      sendMcpLog('info', `✅ 索引完成: 共 ${allBlobNames.length} 个文件块`);
 
       return {
         status: failedBatches.length === 0 ? 'success' : 'partial_success',
@@ -469,22 +483,26 @@ export class IndexManager {
    */
   async searchContext(query: string): Promise<string> {
     logger.info(`Searching with query: ${query}`);
+    sendMcpLog('info', `🔎 开始搜索: ${query}`);
 
     try {
       // 自动索引
       const indexResult = await this.indexProject();
       if (indexResult.status === 'error') {
+        sendMcpLog('error', `❌ 索引失败: ${indexResult.message}`);
         return `Error: Failed to index project. ${indexResult.message}`;
       }
 
       // 加载索引
       const blobNames = this.loadIndex();
       if (blobNames.length === 0) {
+        sendMcpLog('error', '❌ 索引为空');
         return 'Error: No blobs found after indexing.';
       }
 
       // 执行搜索
       logger.info(`Searching with ${blobNames.length} blobs...`);
+      sendMcpLog('info', `🔍 正在搜索 ${blobNames.length} 个文件块...`);
       const payload = {
         information_request: query,
         blobs: {
@@ -510,14 +528,17 @@ export class IndexManager {
       const formattedRetrieval = result.formatted_retrieval || '';
 
       if (!formattedRetrieval) {
+        sendMcpLog('info', '📭 未找到相关代码');
         return 'No relevant code context found for your query.';
       }
 
       logger.info('Search completed');
+      sendMcpLog('info', '✅ 搜索完成');
       return formattedRetrieval;
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`Search failed: ${errorMessage}`);
+      sendMcpLog('error', `❌ 搜索失败: ${errorMessage}`);
       return `Error: ${errorMessage}`;
     }
   }

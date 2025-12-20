@@ -15,6 +15,7 @@ import {
 
 import { initConfig } from './config.js';
 import { logger } from './logger.js';
+import { initMcpLogger } from './mcpLogger.js';
 import { SEARCH_CONTEXT_TOOL } from './prompts/searchContext.js';
 import { searchContextTool } from './tools/searchContext.js';
 
@@ -29,9 +30,13 @@ const server = new Server(
   {
     capabilities: {
       tools: {},
+      logging: {},
     },
   }
 );
+
+// 初始化 MCP 日志模块
+initMcpLogger(server);
 
 /**
  * 列出可用工具
