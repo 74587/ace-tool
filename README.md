@@ -96,6 +96,7 @@ ace-tool provides friendly error messages for common issues:
 |------------|-------------|
 | Token Invalid (401) | Token has expired or is invalid. Update `ACE_TOKEN`. |
 | Access Denied (403) | Token may have been disabled. Contact service provider. |
+| SSL Certificate Error | SSL certificate validation failed. Check `ACE_BASE_URL`. |
 | Connection Refused | Cannot connect to server. Check network or service URL. |
 | Connection Timeout | Request timed out. Check network status. |
 | DNS Resolution Failed | Cannot resolve server address. Check `ACE_BASE_URL`. |
@@ -206,6 +207,7 @@ ace-tool 为常见问题提供友好的错误提示：
 | -------- | ---- |
 | Token 无效 (401) | Token 已过期或无效，请更新 `ACE_TOKEN` |
 | 访问被拒绝 (403) | Token 可能已被禁用，请联系服务提供商 |
+| SSL 证书错误 | SSL 证书验证失败，请检查 `ACE_BASE_URL` 配置 |
 | 连接被拒绝 | 无法连接到服务器，请检查网络或服务地址 |
 | 连接超时 | 请求超时，请检查网络状况 |
 | DNS 解析失败 | 无法解析服务器地址，请检查 `ACE_BASE_URL` |

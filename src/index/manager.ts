@@ -346,6 +346,16 @@ export class IndexManager {
           throw new Error('访问被拒绝，Token 可能已被官方禁用，请联系服务提供商');
         }
 
+        // SSL 证书错误检测 - 不重试
+        if (axiosError.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' ||
+            axiosError.code === 'CERT_HAS_EXPIRED' ||
+            axiosError.code === 'ERR_TLS_CERT_ALTNAME_INVALID' ||
+            lastError.message.includes('certificate') ||
+            lastError.message.includes('altnames')) {
+          sendMcpLog('error', '🔐 SSL 证书验证失败，请检查 ACE_BASE_URL 配置是否正确');
+          throw new Error('SSL 证书验证失败，请检查 ACE_BASE_URL 配置是否正确，或联系服务提供商');
+        }
+
         const isRetryable =
           axiosError.code === 'ECONNREFUSED' ||
           axiosError.code === 'ETIMEDOUT' ||
