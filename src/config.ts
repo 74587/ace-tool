@@ -12,6 +12,55 @@ export interface Config {
   enableLog: boolean;
 }
 
+/**
+ * 上传策略配置（根据项目规模自适应）
+ */
+export interface UploadStrategy {
+  batchSize: number;      // 每批上传的文件块数
+  concurrency: number;    // 并发上传数
+  timeout: number;        // 单次请求超时（毫秒）
+  scaleName: string;      // 规模名称（用于日志）
+}
+
+/**
+ * 根据文件块数量获取自适应上传策略
+ */
+export function getUploadStrategy(blobCount: number): UploadStrategy {
+  if (blobCount < 100) {
+    // 小型项目：保守配置，快速完成
+    return {
+      batchSize: 10,
+      concurrency: 1,
+      timeout: 30000,
+      scaleName: '小型'
+    };
+  } else if (blobCount < 500) {
+    // 中型项目：适度并发
+    return {
+      batchSize: 30,
+      concurrency: 2,
+      timeout: 45000,
+      scaleName: '中型'
+    };
+  } else if (blobCount < 2000) {
+    // 大型项目：高效并发
+    return {
+      batchSize: 50,
+      concurrency: 3,
+      timeout: 60000,
+      scaleName: '大型'
+    };
+  } else {
+    // 超大型项目：最大化吞吐
+    return {
+      batchSize: 70,
+      concurrency: 4,
+      timeout: 90000,
+      scaleName: '超大型'
+    };
+  }
+}
+
 // 默认支持的文本文件扩展名
 const DEFAULT_TEXT_EXTENSIONS = new Set([
   // 编程语言

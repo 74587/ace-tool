@@ -10,6 +10,7 @@ import iconv from 'iconv-lite';
 import ignore from 'ignore';
 import { sendMcpLog } from '../mcpLogger.js';
 import { getIndexFilePath } from '../utils/projectDetector.js';
+import { getUploadStrategy, UploadStrategy } from '../config.js';
 
 type IgnoreInstance = ReturnType<typeof ignore>;
 
@@ -427,36 +428,60 @@ export class IndexManager {
       const failedBatches: number[] = [];
 
       if (blobsToUpload.length > 0) {
-        const totalBatches = Math.ceil(blobsToUpload.length / this.batchSize);
+        // 获取自适应上传策略
+        const strategy = getUploadStrategy(blobsToUpload.length);
+        sendMcpLog('info', `📐 项目规模: ${strategy.scaleName} (批次大小: ${strategy.batchSize}, 并发: ${strategy.concurrency})`);
+
+        const totalBatches = Math.ceil(blobsToUpload.length / strategy.batchSize);
         sendMcpLog('info', `⬆️ 开始上传 ${blobsToUpload.length} 个新文件块，共 ${totalBatches} 批`);
 
-        for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
-          const startIdx = batchIdx * this.batchSize;
-          const endIdx = Math.min(startIdx + this.batchSize, blobsToUpload.length);
-          const batchBlobs = blobsToUpload.slice(startIdx, endIdx);
+        // 准备所有批次
+        const batches: Blob[][] = [];
+        for (let i = 0; i < blobsToUpload.length; i += strategy.batchSize) {
+          batches.push(blobsToUpload.slice(i, i + strategy.batchSize));
+        }
 
-          sendMcpLog('info', `📤 上传批次 ${batchIdx + 1}/${totalBatches}...`);
+        // 并发上传
+        for (let i = 0; i < batches.length; i += strategy.concurrency) {
+          const concurrentBatches = batches.slice(i, i + strategy.concurrency);
+          const batchIndices = concurrentBatches.map((_, idx) => i + idx + 1);
 
-          try {
-            const result = await this.retryRequest(async () => {
-              const response = await this.httpClient.post(`${this.baseUrl}/batch-upload`, {
-                blobs: batchBlobs,
+          sendMcpLog('info', `📤 上传批次 ${batchIndices.join(', ')}/${totalBatches}...`);
+
+          const uploadPromises = concurrentBatches.map(async (batchBlobs, idx) => {
+            const batchIdx = i + idx + 1;
+            try {
+              const result = await this.retryRequest(async () => {
+                const response = await this.httpClient.post(
+                  `${this.baseUrl}/batch-upload`,
+                  { blobs: batchBlobs },
+                  { timeout: strategy.timeout }
+                );
+                return response.data;
               });
-              return response.data;
-            });
 
-            const batchBlobNames = result.blob_names || [];
-            if (batchBlobNames.length === 0) {
-              sendMcpLog('warning', `⚠️ 批次 ${batchIdx + 1} 返回空结果`);
-              failedBatches.push(batchIdx + 1);
-              continue;
+              const batchBlobNames = result.blob_names || [];
+              if (batchBlobNames.length === 0) {
+                sendMcpLog('warning', `⚠️ 批次 ${batchIdx} 返回空结果`);
+                return { success: false, batchIdx, blobNames: [] };
+              }
+
+              return { success: true, batchIdx, blobNames: batchBlobNames };
+            } catch (error: unknown) {
+              const errorMessage = error instanceof Error ? error.message : String(error);
+              sendMcpLog('error', `❌ 批次 ${batchIdx} 上传失败: ${errorMessage}`);
+              return { success: false, batchIdx, blobNames: [] };
             }
+          });
 
-            uploadedBlobNames.push(...batchBlobNames);
-          } catch (error: unknown) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            sendMcpLog('error', `❌ 批次 ${batchIdx + 1} 上传失败: ${errorMessage}`);
-            failedBatches.push(batchIdx + 1);
+          const results = await Promise.all(uploadPromises);
+
+          for (const result of results) {
+            if (result.success) {
+              uploadedBlobNames.push(...result.blobNames);
+            } else {
+              failedBatches.push(result.batchIdx);
+            }
           }
         }
 
