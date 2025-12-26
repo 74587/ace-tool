@@ -10,7 +10,7 @@ import iconv from 'iconv-lite';
 import ignore from 'ignore';
 import { sendMcpLog } from '../mcpLogger.js';
 import { getIndexFilePath } from '../utils/projectDetector.js';
-import { getUploadStrategy, UploadStrategy } from '../config.js';
+import { getUploadStrategy } from '../config.js';
 
 type IgnoreInstance = ReturnType<typeof ignore>;
 
@@ -93,7 +93,6 @@ export class IndexManager {
   private baseUrl: string;
   private token: string;
   private textExtensions: Set<string>;
-  private batchSize: number;
   private maxLinesPerBlob: number;
   private excludePatterns: string[];
   private indexFilePath: string;
@@ -104,7 +103,7 @@ export class IndexManager {
     baseUrl: string,
     token: string,
     textExtensions: Set<string>,
-    batchSize: number,
+    _batchSize: number,  // 保留用于向后兼容，实际使用自适应策略
     maxLinesPerBlob: number = 800,
     excludePatterns: string[] = []
   ) {
@@ -112,7 +111,7 @@ export class IndexManager {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     this.token = token;
     this.textExtensions = textExtensions;
-    this.batchSize = batchSize;
+    // batchSize 参数保留用于向后兼容，但实际使用自适应策略
     this.maxLinesPerBlob = maxLinesPerBlob;
     this.excludePatterns = excludePatterns;
     this.indexFilePath = getIndexFilePath(projectRoot);
@@ -442,7 +441,12 @@ export class IndexManager {
         }
 
         // 并发上传
+        let fatalError: string | null = null;
+
         for (let i = 0; i < batches.length; i += strategy.concurrency) {
+          // 如果已经发生致命错误，停止上传
+          if (fatalError) break;
+
           const concurrentBatches = batches.slice(i, i + strategy.concurrency);
           const batchIndices = concurrentBatches.map((_, idx) => i + idx + 1);
 
@@ -463,14 +467,23 @@ export class IndexManager {
               const batchBlobNames = result.blob_names || [];
               if (batchBlobNames.length === 0) {
                 sendMcpLog('warning', `⚠️ 批次 ${batchIdx} 返回空结果`);
-                return { success: false, batchIdx, blobNames: [] };
+                return { success: false, batchIdx, blobNames: [], error: '服务器返回空结果' };
               }
 
-              return { success: true, batchIdx, blobNames: batchBlobNames };
+              return { success: true, batchIdx, blobNames: batchBlobNames, error: null };
             } catch (error: unknown) {
               const errorMessage = error instanceof Error ? error.message : String(error);
               sendMcpLog('error', `❌ 批次 ${batchIdx} 上传失败: ${errorMessage}`);
-              return { success: false, batchIdx, blobNames: [] };
+
+              // 检测致命错误（不应继续重试的错误）
+              const isFatalError =
+                errorMessage.includes('Token') ||
+                errorMessage.includes('SSL') ||
+                errorMessage.includes('证书') ||
+                errorMessage.includes('访问被拒绝') ||
+                errorMessage.includes('无法解析服务器');
+
+              return { success: false, batchIdx, blobNames: [], error: errorMessage, fatal: isFatalError };
             }
           });
 
@@ -481,13 +494,18 @@ export class IndexManager {
               uploadedBlobNames.push(...result.blobNames);
             } else {
               failedBatches.push(result.batchIdx);
+              // 记录第一个致命错误
+              if (result.fatal && !fatalError) {
+                fatalError = result.error;
+              }
             }
           }
         }
 
         if (uploadedBlobNames.length === 0 && blobsToUpload.length > 0 && existingHashes.size === 0) {
-          sendMcpLog('error', '❌ 所有批次上传失败');
-          return { status: 'error', message: 'All batches failed on first indexing' };
+          const errorMsg = fatalError || '所有批次上传失败，请检查网络连接和服务配置';
+          sendMcpLog('error', `❌ ${errorMsg}`);
+          return { status: 'error', message: errorMsg };
         }
       } else {
         sendMcpLog('info', '✅ 无需上传新文件，使用缓存索引');
