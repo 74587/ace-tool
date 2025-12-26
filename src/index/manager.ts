@@ -32,6 +32,7 @@ interface IndexResult {
     total_blobs: number;
     existing_blobs: number;
     new_blobs: number;
+    failed_batches?: number;
   };
 }
 
@@ -425,6 +426,14 @@ export class IndexManager {
       // 只上传新的 blob
       const uploadedBlobNames: string[] = [];
       const failedBatches: number[] = [];
+      let fatalError: string | null = null;
+
+      // 辅助函数：保存当前进度
+      const saveProgress = () => {
+        const currentBlobNames = [...existingHashes, ...uploadedBlobNames];
+        this.saveIndex(currentBlobNames);
+        return currentBlobNames.length;
+      };
 
       if (blobsToUpload.length > 0) {
         // 获取自适应上传策略
@@ -441,11 +450,12 @@ export class IndexManager {
         }
 
         // 并发上传
-        let fatalError: string | null = null;
-
         for (let i = 0; i < batches.length; i += strategy.concurrency) {
-          // 如果已经发生致命错误，停止上传
-          if (fatalError) break;
+          // 如果已经发生致命错误，停止上传但保存已成功的部分
+          if (fatalError) {
+            sendMcpLog('warning', `⚠️ 检测到致命错误，停止后续上传，保存已完成的进度...`);
+            break;
+          }
 
           const concurrentBatches = batches.slice(i, i + strategy.concurrency);
           const batchIndices = concurrentBatches.map((_, idx) => i + idx + 1);
@@ -467,10 +477,10 @@ export class IndexManager {
               const batchBlobNames = result.blob_names || [];
               if (batchBlobNames.length === 0) {
                 sendMcpLog('warning', `⚠️ 批次 ${batchIdx} 返回空结果`);
-                return { success: false, batchIdx, blobNames: [], error: '服务器返回空结果' };
+                return { success: false, batchIdx, blobNames: [], error: '服务器返回空结果', fatal: false };
               }
 
-              return { success: true, batchIdx, blobNames: batchBlobNames, error: null };
+              return { success: true, batchIdx, blobNames: batchBlobNames, error: null, fatal: false };
             } catch (error: unknown) {
               const errorMessage = error instanceof Error ? error.message : String(error);
               sendMcpLog('error', `❌ 批次 ${batchIdx} 上传失败: ${errorMessage}`);
@@ -500,22 +510,69 @@ export class IndexManager {
               }
             }
           }
-        }
 
-        if (uploadedBlobNames.length === 0 && blobsToUpload.length > 0 && existingHashes.size === 0) {
-          const errorMsg = fatalError || '所有批次上传失败，请检查网络连接和服务配置';
-          sendMcpLog('error', `❌ ${errorMsg}`);
-          return { status: 'error', message: errorMsg };
+          // 每轮并发完成后保存进度（断点续传支持）
+          if (uploadedBlobNames.length > 0) {
+            const savedCount = saveProgress();
+            sendMcpLog('info', `💾 进度已保存: ${savedCount} 个文件块`);
+          }
         }
       } else {
         sendMcpLog('info', '✅ 无需上传新文件，使用缓存索引');
       }
 
-      // 合并已存在和新上传的 blob 名称
+      // 最终保存（确保所有成功的都被保存）
       const allBlobNames = [...existingHashes, ...uploadedBlobNames];
       this.saveIndex(allBlobNames);
 
-      const message = `Indexed ${allBlobNames.length} blobs (existing: ${existingHashes.size}, new: ${uploadedBlobNames.length})`;
+      // 根据结果返回不同状态
+      if (fatalError) {
+        // 致命错误但有部分成功
+        if (uploadedBlobNames.length > 0) {
+          const message = `部分索引成功: ${allBlobNames.length} 个文件块已保存 (已有: ${existingHashes.size}, 新增: ${uploadedBlobNames.length})。错误: ${fatalError}。请修复问题后重试，已完成的部分会被保留。`;
+          sendMcpLog('warning', `⚠️ ${message}`);
+          return {
+            status: 'partial_success',
+            message,
+            stats: {
+              total_blobs: allBlobNames.length,
+              existing_blobs: existingHashes.size,
+              new_blobs: uploadedBlobNames.length,
+              failed_batches: failedBatches.length,
+            },
+          };
+        } else if (existingHashes.size > 0) {
+          // 没有新增成功但有已存在的索引
+          const message = `本次上传失败，但保留了 ${existingHashes.size} 个已有索引。错误: ${fatalError}。请修复问题后重试。`;
+          sendMcpLog('warning', `⚠️ ${message}`);
+          return {
+            status: 'partial_success',
+            message,
+            stats: {
+              total_blobs: existingHashes.size,
+              existing_blobs: existingHashes.size,
+              new_blobs: 0,
+              failed_batches: failedBatches.length,
+            },
+          };
+        } else {
+          // 完全失败
+          sendMcpLog('error', `❌ ${fatalError}`);
+          return { status: 'error', message: fatalError };
+        }
+      }
+
+      // 非致命错误情况
+      if (failedBatches.length > 0 && uploadedBlobNames.length === 0 && existingHashes.size === 0) {
+        const errorMsg = '所有批次上传失败，请检查网络连接和服务配置';
+        sendMcpLog('error', `❌ ${errorMsg}`);
+        return { status: 'error', message: errorMsg };
+      }
+
+      const message = failedBatches.length > 0
+        ? `索引部分完成: ${allBlobNames.length} 个文件块 (已有: ${existingHashes.size}, 新增: ${uploadedBlobNames.length}, 失败批次: ${failedBatches.length})。重试可继续完成剩余部分。`
+        : `Indexed ${allBlobNames.length} blobs (existing: ${existingHashes.size}, new: ${uploadedBlobNames.length})`;
+
       sendMcpLog('info', `✅ 索引完成: 共 ${allBlobNames.length} 个文件块`);
 
       return {
@@ -525,6 +582,7 @@ export class IndexManager {
           total_blobs: allBlobNames.length,
           existing_blobs: existingHashes.size,
           new_blobs: uploadedBlobNames.length,
+          ...(failedBatches.length > 0 && { failed_batches: failedBatches.length }),
         },
       };
     } catch (error: unknown) {
